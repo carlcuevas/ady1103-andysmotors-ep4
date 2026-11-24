@@ -1,0 +1,118 @@
+#!/bin/bash
+# =============================================================================
+# AndysMotors EP4 - arranque de la instancia (Amazon Linux 2023)
+# 1. Docker + Compose + Git + CloudWatch Agent + Node.js 22
+# 2. Entorno del caso (6 plataformas + HAProxy + PostgreSQL) con logs en archivo
+# 3. CloudWatch Agent: logs -> CloudWatch Logs, memoria y disco -> CWAgent
+# 4. Generador de trafico del docente en segundo plano
+# 5. Inyector de metricas de negocio en /home/ec2-user/inyector (sin credenciales)
+# Registro de este arranque: /var/log/andys-bootstrap.log
+# =============================================================================
+exec > /var/log/andys-bootstrap.log 2>&1
+set -x
+
+dnf install -y docker git amazon-cloudwatch-agent tar gzip xz
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+# Docker Compose v2 (plugin)
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# Node.js 22 LTS (binario oficial)
+NODE_VER=v22.12.0
+curl -fsSL https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-linux-x64.tar.xz -o /tmp/node.tar.xz
+mkdir -p /opt/node
+tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1
+ln -sf /opt/node/bin/node /usr/local/bin/node
+ln -sf /opt/node/bin/npm /usr/local/bin/npm
+ln -sf /opt/node/bin/npx /usr/local/bin/npx
+
+# ------------------------------------------------------------------ entorno
+mkdir -p /var/log/andysmotors
+chmod 777 /var/log/andysmotors
+git clone --depth 1 ${repo_url} /opt/ADY1103-Activities
+cd /opt/ADY1103-Activities/Casos/AndysMotors/demo
+docker build -t andys-motors:local ./app
+docker compose --profile todo up -d
+
+# ---------------------------------------------------------- CloudWatch Agent
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'JSON'
+{
+  "agent": { "metrics_collection_interval": 60, "run_as_user": "root" },
+  "metrics": {
+    "namespace": "CWAgent",
+    "append_dimensions": { "InstanceId": "$${aws:InstanceId}" },
+    "aggregation_dimensions": [["InstanceId"]],
+    "metrics_collected": {
+      "mem":  { "measurement": ["mem_used_percent"] },
+      "disk": { "measurement": ["used_percent"], "resources": ["/"] }
+    }
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          { "file_path": "/var/log/andysmotors/web.log",     "log_group_name": "${log_group}", "log_stream_name": "web" },
+          { "file_path": "/var/log/andysmotors/stock.log",   "log_group_name": "${log_group}", "log_stream_name": "stock" },
+          { "file_path": "/var/log/andysmotors/agenda.log",  "log_group_name": "${log_group}", "log_stream_name": "agenda" },
+          { "file_path": "/var/log/andysmotors/crm.log",     "log_group_name": "${log_group}", "log_stream_name": "crm" },
+          { "file_path": "/var/log/andysmotors/pagos.log",   "log_group_name": "${log_group}", "log_stream_name": "pagos" },
+          { "file_path": "/var/log/andysmotors/gateway.log", "log_group_name": "${log_group}", "log_stream_name": "gateway" },
+          { "file_path": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log",
+            "log_group_name": "${log_group_debug}", "log_stream_name": "agente" },
+          { "file_path": "/var/log/andys-trafico.log",
+            "log_group_name": "${log_group_debug}", "log_stream_name": "generador-trafico" },
+          { "file_path": "/var/log/andys-bootstrap.log",
+            "log_group_name": "${log_group_debug}", "log_stream_name": "bootstrap" },
+          { "file_path": "/var/log/andys-inyector.log",
+            "log_group_name": "${log_group_debug}", "log_stream_name": "inyector" }
+        ]
+      }
+    }
+  }
+}
+JSON
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+# ------------------------------------------------- trafico (segundo plano)
+sleep 30
+nohup python3 scripts/generar_trafico.py --url http://localhost --hora-inicio 9 --factor 1 \
+  --duracion ${duracion_trafico} > /var/log/andys-trafico.log 2>&1 &
+
+# ------------------------------------------------------- inyector Node.js
+mkdir -p /home/ec2-user/inyector
+echo "${inyector_js_b64}" | base64 -d | gunzip > /home/ec2-user/inyector/inyector-metricas.js
+echo "${package_json_b64}" | base64 -d | gunzip > /home/ec2-user/inyector/package.json
+chown -R ec2-user:ec2-user /home/ec2-user/inyector
+sudo -u ec2-user -H bash -c 'cd /home/ec2-user/inyector && PATH=/usr/local/bin:$PATH npm install --no-audit --no-fund'
+
+# Inyector en modo normal como servicio: arranca solo y corre 4 horas.
+# Su salida (lineas con HTTP 200) llega a CloudWatch Logs, stream "inyector".
+touch /var/log/andys-inyector.log
+chown ec2-user:ec2-user /var/log/andys-inyector.log
+cat > /etc/systemd/system/andys-inyector.service <<'UNIT'
+[Unit]
+Description=AndysMotors - inyector de metricas de negocio (EP4)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/inyector
+Environment=AWS_REGION=${region}
+ExecStart=/usr/local/bin/node /home/ec2-user/inyector/inyector-metricas.js --modo normal --duracion 14400 --hora-inicio 9
+StandardOutput=append:/var/log/andys-inyector.log
+StandardError=append:/var/log/andys-inyector.log
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now andys-inyector.service
+
+echo "ANDYS-EP4 LISTO $(date -u)"

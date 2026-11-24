@@ -1,0 +1,28 @@
+{
+  "tags": {
+    "Entorno": {
+      "tag_key": { "@@assign": "Entorno" },
+      "tag_value": { "@@assign": ["produccion", "qa", "desarrollo", "laboratorio"] },
+      "enforced_for": { "@@assign": ["ec2:instance", "ec2:volume"] }
+    },
+    "Responsable": {
+      "tag_key": { "@@assign": "Responsable" },
+      "tag_value": { "@@assign": ["equipo-sre", "equipo-desarrollo", "equipo-comercial", "finanzas"] },
+      "enforced_for": { "@@assign": ["ec2:instance", "ec2:volume"] }
+    },
+    "CentroDeCostos": {
+      "tag_key": { "@@assign": "CentroDeCostos" },
+      "tag_value": { "@@assign": ["CC-1001", "CC-1002", "CC-2001", "CC-3001"] },
+      "enforced_for": { "@@assign": ["ec2:instance", "ec2:volume"] }
+    },
+    "Proyecto": {
+      "tag_key": { "@@assign": "Proyecto" },
+      "tag_value": { "@@assign": ["andysmotors-observabilidad", "andysmotors-plataforma", "andysmotors-expansion"] },
+      "enforced_for": { "@@assign": ["ec2:instance", "ec2:volume"] }
+    },
+    "Plataforma": {
+      "tag_key": { "@@assign": "Plataforma" },
+      "tag_value": { "@@assign": ["web", "stock", "agenda", "crm", "pagos", "gateway", "transversal"] }
+    }
+  }
+}

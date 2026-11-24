@@ -1,0 +1,12 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+crash.log
+# Node
+node_modules/
+package-lock.json
+# Reportes generados
+auditoria-tags-*.txt
+inventario-costos-*.txt
