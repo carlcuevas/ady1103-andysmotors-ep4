@@ -8,6 +8,9 @@ set -uo pipefail
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export AWS_DEFAULT_REGION="${AWS_REGION:-us-east-1}"
 export PATH="$HOME/bin:$PATH"
+# El home de CloudShell tiene solo 1 GB y el proveedor AWS de Terraform pesa
+# ~700 MB: los plugins se guardan en /tmp (el estado sigue en terraform/).
+export TF_DATA_DIR="/tmp/andysmotors-ep4-tf"
 LG_DEBUG="/andysmotors/agente-debug"
 ALARMA_COSTO="AndysMotors-FinOps-CostoPutMetricData"
 
@@ -26,7 +29,9 @@ asegurar_terraform() {
 cmd_desplegar() {
   asegurar_terraform
   titulo "Desplegando infraestructura (terraform apply)"
-  cd "$RAIZ/terraform" && terraform init -input=false && terraform apply -auto-approve -input=false
+  cd "$RAIZ/terraform" || exit 1
+  terraform init -input=false || { echo "ERROR: fallo terraform init"; exit 1; }
+  terraform apply -auto-approve -input=false || { echo "ERROR: fallo terraform apply"; exit 1; }
   echo
   echo ">> Confirma los 2 correos 'AWS Notification - Subscription Confirmation'."
   echo ">> En 8-10 minutos corre: ./ep4.sh estado"
@@ -86,7 +91,9 @@ cmd_alarma() {
 cmd_destruir() {
   asegurar_terraform
   titulo "Eliminando infraestructura (terraform destroy)"
-  cd "$RAIZ/terraform" && terraform destroy -auto-approve -input=false
+  cd "$RAIZ/terraform" || exit 1
+  terraform init -input=false >/dev/null || { echo "ERROR: fallo terraform init"; exit 1; }
+  terraform destroy -auto-approve -input=false
 }
 
 cmd_ayuda() {
