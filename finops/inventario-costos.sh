@@ -63,9 +63,9 @@ echo "    Logs (ingesta proyectada 30 dias + almacenamiento actual): USD $C_LOGS
 
 # ---------------------------------------------------- dashboards y alarmas
 echo
-echo "[4] Dashboards (USD 3,00 c/u) y alarmas (USD 0,10 estandar | USD 0,30 alta resolucion)"
-DASH=$(aws cloudwatch list-dashboards --query 'length(DashboardEntries)' --output text)
-ALARMAS=$(aws cloudwatch describe-alarms --query 'MetricAlarms[].[AlarmName, Period]' --output text)
+echo "[4] Dashboards y alarmas de AndysMotors (USD 3,00 c/u | (USD 0,10 estandar | USD 0,30 alta resolucion)"
+DASH=$(aws cloudwatch list-dashboards --dashboard-name-prefix AndysMotors --query 'length(DashboardEntries)' --output text)
+ALARMAS=$(aws cloudwatch describe-alarms --alarm-name-prefix AndysMotors --query 'MetricAlarms[].[AlarmName, Period]' --output text)
 STD=0; HR=0
 while read -r nombre periodo; do
   [ -z "$nombre" ] && continue
